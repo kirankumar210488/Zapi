@@ -8,7 +8,7 @@ import org.apache.commons.configuration.ConfigurationFactory;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 
-public class BaseStep{
+public class BaseStep {
 
 	public boolean initilizestatus = false;
 	public InputStream isConfig;
@@ -35,5 +35,9 @@ public class BaseStep{
 			Log.info("Initilization is Already Done");
 		}
 		return config;
+	}
+	
+	public enum Status{
+		passed,failed;
 	}
 }

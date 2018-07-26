@@ -1,7 +1,5 @@
 package com.Zapi.Utilities;
 
-import java.io.File;
-import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Date;
@@ -15,14 +13,6 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import org.apache.commons.configuration.Configuration;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpDelete;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.mime.MultipartEntityBuilder;
-import org.apache.http.entity.mime.content.FileBody;
-import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -90,6 +80,32 @@ public class TestCaseMgmtCloud extends BaseStep {
 			response = client.target(url).request(MediaType.APPLICATION_JSON_TYPE)
 					.header("Authorization", JIRA_AUTHORIZATION).get();
 		}
+		System.out.println("GET : "+response.toString());
+		if (response.getStatus() != 200) {
+			throw new Exception("Unable to connect to JIRA");
+		}
+		return response.readEntity(String.class);
+	}
+	
+	private String doDelete(String url) throws Exception {
+		Client client = ClientBuilder.newClient();
+		Response response = null;
+		if (url.contains(ZAPI_BASEURL)) {
+			ZFJCloudRestClient client1 = ZFJCloudRestClient.restBuilder(ZAPI_BASEURL, ACCESS_KEY, SECRET_KEY, USER_NAME)
+					.build();
+			JwtGenerator jwtGenerator = client1.getJwtGenerator();
+			URI uri = new URI(url);
+			int expirationInSec = 360;
+			String jwt = jwtGenerator.generateJWT("DELETE", uri, expirationInSec);
+			// Print the URL and JWT token to be used for making the REST call
+			System.out.println("FINAL API : " + uri.toString());
+			System.out.println("JWT Token : " + jwt);
+			response = client.target(uri).request().header("Authorization", jwt).header("zapiAccessKey", ACCESS_KEY)
+					.get();
+		} else {
+			response = client.target(url).request(MediaType.APPLICATION_JSON_TYPE)
+					.header("Authorization", JIRA_AUTHORIZATION).delete();
+		}
 		if (response.getStatus() != 200) {
 			throw new Exception("Unable to connect to JIRA");
 		}
@@ -152,24 +168,8 @@ public class TestCaseMgmtCloud extends BaseStep {
 		return response.readEntity(String.class);
 	}
 
-	// private String getProjectId() throws Exception {
-	// String projectId = "";
-	// String responseString = doGet(JIRA_BASEURL + JIRA_API_CONTEXT
-	// + "project/" + PROJECT_KEY);
-	// JSONObject obj = new JSONObject(responseString);
-	// projectId = obj.getString("id");
-	// if (projectId.isEmpty()) {
-	// throw new Exception("Unable to find the Project " + PROJECT_KEY);
-	// }
-	// log.info("Project Id Retrived : " + projectId);
-	// return projectId;
-	// }
-
 	private String createVersion() throws Exception {
 		String versionId = "";
-//		SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
-//		Date currentDate = new Date();
-//		String newDate = dateFormat.format(currentDate);
 		String payload = "{\"description\": \"New Version Created through Automation\",\"name\":\"" + RELEASE_VERSION
 				+ "\",\"archived\": false,\"released\": " + config.getBoolean("released") + ",\"releaseDate\": \""
 				+ config.getString("release.endDate") + "\",\"startDate\": \""+config.getString("release.startDate")+"\",\"project\":\"" + PROJECT_KEY + "\",\"projectId\": \"" + PROJECT_ID + "\"}";
@@ -201,7 +201,7 @@ public class TestCaseMgmtCloud extends BaseStep {
 		return versionId;
 	}
 
-	public String getCycleId() throws Exception {
+	private String getCycleId() throws Exception {
 		String cycleId = "";
 		String responseString = doGet(
 				ZAPI_BASEURL + ZAPI_URI_CONTEXT + "cycles/search?projectId=" + PROJECT_ID + "&versionId=" + VERSION_ID);
@@ -251,49 +251,49 @@ public class TestCaseMgmtCloud extends BaseStep {
 		log.info("Execution Created : " + executionId);
 		return executionId;
 	}
+	
+	public String createExecution(int issueId) throws Exception {
+		String payload = "{\"cycleId\": \"" + CYCLE_ID + "\",\"issueId\": \"" + issueId + "\",\"projectId\": \""
+				+ PROJECT_ID + "\",\"versionId\": \"" + VERSION_ID + "\",\"assigneeType\": \"currentUser\"}";
+		System.out.println(payload);
+		String responseString = doPost(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "execution", payload);
+		JSONObject obj = new JSONObject(responseString);
+		String executionId = obj.getJSONObject("execution").getString("id");
+		log.info("Execution Created : " + executionId);
+		return executionId;
+	}
 
-	private JSONObject getTestStepIds(String jiraKey, String executionId, int issueId) throws Exception {
+	public JSONObject getTestStepIds(String jiraKey, String executionId, int issueId) throws Exception {
+		JSONArray steps = getTestSteps(issueId);
 		JSONObject stepIds = new JSONObject();
 		List<String> testStepId = new ArrayList<String>();
 		List<String> testResultIds = new ArrayList<String>();
-		List<String> linkedIssueId = new ArrayList<String>();
-		List<String> linkedIssueStatus = new ArrayList<String>();
-		List<String> linkedIssueKey = new ArrayList<String>();
-		JSONArray array = null;
-		String response = doGet(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "stepresult/search?issueId=" + issueId
-				+ "&executionId=" + executionId + "&isOrdered=true");
-		JSONObject obje = new JSONObject(response);
-		JSONArray arr = obje.getJSONArray("stepResults");
-		for (Object object : arr) {
-			JSONObject obj = (JSONObject) object;
-			String testResultId = obj.getString("id");
-			String testStep = obj.getString("stepId");
-			try {
-				array = obj.getJSONArray("defects");
-				if (array.length() > 0) {
-					linkedIssueId.add(Integer.toString(array.getJSONObject(0).getInt("id")));
-					linkedIssueKey.add(array.getJSONObject(0).getString("key"));
-					linkedIssueStatus.add(array.getJSONObject(0).getJSONObject("status").getString("name"));
-				} else {
-					linkedIssueId.add("");
-					linkedIssueKey.add("");
-					linkedIssueStatus.add("");
-					log.info("There is no linked issue");
+		if(steps.length()>0) {
+			String response = doGet(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "stepresult/search?issueId=" + issueId
+					+ "&executionId=" + executionId + "&isOrdered=true");
+			System.out.println(response);
+			JSONObject obje = new JSONObject(response);
+			System.out.println(response);
+			
+			JSONArray arr = obje.getJSONArray("stepResults");
+			for (int i=0;i<steps.length();i++) {		
+				JSONObject stepObj = (JSONObject) steps.get(i);
+				String testResultId = "";
+				for(int j=0;j<stepObj.length();j++) {
+					if(arr.getJSONObject(j).getString("stepId").equals(stepObj.getString("id"))) {
+						arr.getJSONObject(j).getString("stepId");
+						testResultId = arr.getJSONObject(j).getString("id");
+						System.out.println(testResultId);
+						testResultIds.add(testResultId);
+						break;
+					}
 				}
-			} catch (Exception e) {
-				linkedIssueId.add("");
-				linkedIssueKey.add("");
-				linkedIssueStatus.add("");
-				log.info("There is no linked issue");
-			}
-			testStepId.add(testStep);
-			testResultIds.add(testResultId);
+				String testStep = stepObj.getString("id");
+				testStepId.add(testStep);			
+			}	
 		}
 		stepIds.put("testStepId", testStepId);
 		stepIds.put("testResultId", testResultIds);
-		stepIds.put("linkedIssueId", linkedIssueId);
-		stepIds.put("linkedIssueKey", linkedIssueKey);
-		stepIds.put("linkedIssueStatus", linkedIssueStatus);
 		log.info("Step Ids Retrived : " + stepIds);
 		return stepIds;
 	}
@@ -327,11 +327,7 @@ public class TestCaseMgmtCloud extends BaseStep {
 	}
 
 	private void deleteAttachment(String attachmentId) throws Exception {
-		HttpClient httpClient = HttpClientBuilder.create().build();
-		HttpDelete deleteRequest = new HttpDelete(JIRA_BASEURL + JIRA_API_CONTEXT + "attachment/" + attachmentId);
-		deleteRequest.setHeader("Authorization", JIRA_AUTHORIZATION);
-		deleteRequest.setHeader("X-Atlassian-Token", "nocheck");
-		HttpResponse response = httpClient.execute(deleteRequest);
+		String response = doDelete(JIRA_BASEURL + JIRA_API_CONTEXT + "attachment/" + attachmentId);
 		System.out.println(response);
 	}
 
@@ -351,16 +347,9 @@ public class TestCaseMgmtCloud extends BaseStep {
 	}
 
 	private void attachScreenShotToIssue(HashMap<String, String> filePath, String jiraKey, String testKey)
-			throws ClientProtocolException, IOException {
-		File fileUpload = new File(filePath.get("@" + testKey));
-		HttpClient httpClient = HttpClientBuilder.create().build();
-		HttpPost postRequest = new HttpPost(JIRA_BASEURL + JIRA_API_CONTEXT + "issue/" + jiraKey + "/attachments");
-		postRequest.setHeader("Authorization", JIRA_AUTHORIZATION);
-		postRequest.setHeader("X-Atlassian-Token", "nocheck");
-		MultipartEntityBuilder entity = MultipartEntityBuilder.create();
-		entity.addPart("file", new FileBody(fileUpload));
-		postRequest.setEntity(entity.build());
-		HttpResponse response = httpClient.execute(postRequest);
+			throws Exception {
+		String payload = "";
+		String response = doPost(JIRA_BASEURL + JIRA_API_CONTEXT + "issue/" + jiraKey + "/attachments", payload);
 		log.info("Attachment Added to the issue : " + response);
 	}
 
@@ -411,16 +400,35 @@ public class TestCaseMgmtCloud extends BaseStep {
 		log.info("Test Step Status Updated : " + response);
 		return changeStatus;
 	}
+	
+	public String updateTestStepStatus(Status status, int issueId, String stepId, String executionId, String resultId) throws Exception {
+		String changeStatus = "";
+		int statusId = -1;
+		String payload = "";
+		if (status.toString().equals("passed")) {
+			statusId = 1;
+		} else if (status.toString().equals("failed")) {
+			statusId = 2;
+		}
+		payload = "{\"status\":{\"id\":\"" + statusId + "\"},\"issueId\":" + issueId + ",\"stepId\":\"" + stepId
+					+ "\",\"executionId\":\"" + executionId + "\"}";
+		String response = doPut(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "stepresult/" + resultId, payload);
+		log.info("Test Step Status Updated : " + response);
+		return changeStatus;
+	}
 
 	public JSONObject updateExecutioStatusAndLogDefects(HashMap<String, String> attachmentPath, String priority,
 			String jiraKey, String status, JSONObject stepDetailsObj) throws Exception {
 		int issueId = getIssueId(jiraKey);
 		JSONObject DataObject = new JSONObject();
 		int statusId = -1;
-		if (status.equalsIgnoreCase("passed")) {
+		switch (status.toLowerCase()) {
+		case "passed":
 			statusId = 1;
-		} else {
+			break;
+		case "failed":
 			statusId = 2;
+			break;
 		}
 		String executionId = createExecution(CYCLE_ID, issueId, VERSION_ID);
 		String payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
@@ -451,36 +459,69 @@ public class TestCaseMgmtCloud extends BaseStep {
 		return DataObject;
 	}
 
-	public void updateExecutioStatus(String jiraKey, String status) throws Exception {
-		int issueId = getIssueId(jiraKey);
-		updateExecutioStatus(jiraKey, issueId, status);		
+	public void updateExecutioStatus(int issueId,String status,String executionId) throws Exception {
+//		int issueId = getIssueId(jiraKey);
+		updateExecutioStatus(issueId, status,executionId,null);		
 	}
 	
-	public void updateExecutioStatus(String jiraKey,int issueId, String status) throws Exception {
-		String executionId = createExecution(CYCLE_ID, issueId, VERSION_ID);
+	private void updateExecutioStatus(int issueId, String status,String executionId,String defectKey) throws Exception {
+		String payload = null;
 		int statusId = -1;
 		switch (status.toLowerCase()) {
 		case "passed":
 			statusId = 1;
+			payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
+					+ ",\"id\":\"" + executionId + "\"}";
 			break;
 		case "failed":
 			statusId = 2;
-			break;
-		case "wip":
-			statusId = 3;
-			break;
-		case "blocked":
-			statusId = 4;
+//			if(defectKey==null) {
+//				String defectId = createNewDefect();
+//				payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
+//						+ ",\"id\":\"" + executionId + "\"},\"defects\":[\""+defectId+"\"]";	
+//			}else {
+				payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
+						+ ",\"id\":\"" + executionId + "\"}";	
+//			}			
 			break;
 		default:
-			statusId = 5;
+			payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
+			+ ",\"id\":\"" + executionId + "\"}";	
 			break;
-		}
-		String payload = "{\"status\":{\"id\":" + statusId + "},\"issueId\":" + issueId + ",\"projectId\":" + PROJECT_ID
-				+ ",\"id\":\"" + executionId + "\"}";
+		}		
 		String responseString = doPut(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "execution/" + executionId, payload);
 		System.out.println(responseString);
 		log.info("Execution status updated");
+	}
+	
+	private String updateTestStepStatus(String status, int issueId, String stepId, String executionId) throws Exception {
+		String changeStatus = "";
+		int statusId = -1;
+		String BugId = "";
+		String payload = "";
+		if (status.equals("passed")) {
+			statusId = 1;
+		} else if (status.equals("failed")) {
+			statusId = 2;
+		}
+		if (!BugId.equals("")) {
+			payload = "{\"defects\":[" + Integer.valueOf(BugId) + "],\"status\":{\"id\":\"" + statusId
+					+ "\"},\"issueId\":" + issueId + ",\"stepId\":\"" + stepId + "\",\"executionId\":\"" + executionId
+					+ "\"}";
+		} else {
+			payload = "{\"status\":{\"id\":\"" + statusId + "\"},\"issueId\":" + issueId + ",\"stepId\":\"" + stepId
+					+ "\",\"executionId\":\"" + executionId + "\"}";
+		}
+//		String response = doPut(ZAPI_BASEURL + ZAPI_URI_CONTEXT + "stepresult/" + resultId, payload);
+//		log.info("Test Step Status Updated : " + response);
+		return changeStatus;
+	}
+	
+	private JSONArray getTestSteps(int issueId) throws Exception {
+		String response = doGet(ZAPI_BASEURL+ZAPI_URI_CONTEXT+"teststep/"+issueId+"?projectId="+PROJECT_ID);
+		JSONArray obj = new JSONArray(response);
+		System.out.println("New : "+obj.toString());
+		return obj;
 	}
 	
 }

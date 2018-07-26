@@ -42,11 +42,6 @@
               <goal>shade</goal>
             </goals>
             <configuration>
-              <transformers>
-                <transformer>
-                  <mainClass>com.Zapi.Trigger.Main</mainClass>
-                </transformer>
-              </transformers>
               <filters>
                 <filter>
                   <artifact>*:*</artifact>
